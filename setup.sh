@@ -13,5 +13,9 @@ fi
 echo 'Configuring environment variables to point to this project'
 
 # Configuring GO PATH to this project 
-export GOPATH="$PWD"
+export GOPATH=$PWD
 export PATH=$PATH:$(go env GOPATH)/bin
+
+echo 'Generating Protobuf Artifacts'
+cd src/protobuf
+sh proto.sh

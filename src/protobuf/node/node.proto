@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+service NodeDiscovery {
+    // service to get a list of closer Nodes
+    rpc FindNodes(Node) returns (CloserNodes) {}
+}
+
+message Node {
+    // 256 bit node identification number
+    bytes nodeId = 1;
+    // domain of that node
+    string domain = 2;
+    // port of the node
+    int32 port = 3;
+}
+
+message CloserNodes {
+  // List of nodes found closest to request key
+  repeated Node nodes = 1;
+}
