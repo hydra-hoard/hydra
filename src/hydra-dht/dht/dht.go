@@ -35,21 +35,23 @@ type Cache struct {
 	table [][]cacheObject
 }
 
-func ping(d_node node,channel chan node,i int, pings chan int) {
-	var bool := pb.Ping()
-
+func ping(d_node node, cacheList *[]cacheObject, i int, pings chan int) {
+	
+	var bool := pb.Ping(node)
+	ob := cacheObject{lastTime: time.Now(), dead: true}
 	if(bool) {
-		channel <- d_node
+		// dead node false
+		cacheList[i] = ob
 	} else {
-		// dead node 
-		// update cache
-		channel <- d_node
+		// dead node true
+		ob.dead = false
+		cacheList[i] = ob
 	}
 
 	pings <- 1
 }
 
-func mergeAllPings(final chan int,pings chan int) {
+func mergeAllPings(final chan int, pings chan int) {
 	for {
 		i += <- pings
 
@@ -60,19 +62,26 @@ func mergeAllPings(final chan int,pings chan int) {
 	}
 }
 
-func checkAndUpdateCache(list []node, cache Cache, i int) int {
+func checkForDeadNodes(cacheList *[]cacheObject) (bool,int){
+	for j, d_node := range cache.table[i] {
+		if d_node.dead == true {
+			// indicate to all nodes to finsh their go functions
+			return true,j
+		}
+	}
+
+	return false,-1
+}
+
+func checkAndUpdateCache(list []node, cacheList *[]cacheObject) int {
 	
 	var dead_nodes []node 
 	time_now := time.Now()
-	for j, d_node := range cache.table[i] {
-		// check for dead nodes
-		if d_node.dead == true {
-			return j
-		}
 
-		if(time.Since(d_node.lastTime).Minutes() > timeDuration) {
-			dead_nodes = append(dead_nodes,d_node)
-		}
+	dead, i = checkForDeadNodes(cacheList)
+	
+	if(dead) {
+		return i
 	}
 
 	var final chan int
@@ -80,11 +89,10 @@ func checkAndUpdateCache(list []node, cache Cache, i int) int {
 
 	go mergeAllPings(final,pings)
 
-	for j, d_node := range dead_nodes {
-		// ping nodes, get response update table concurrently
-		var channel chan node
-		go ping(d_node,channel,pings)
-		go store(channel,pings,list,j)
+	for j, d_node := range cacheList {
+		if(time.Since(d_node.lastTime).Minutes() > timeDuration) {
+			go ping(d_node,cacheList,j,pings)
+		}
 	}
 
 	<- final
@@ -98,11 +106,6 @@ func finalAdd(list chan node, i int, dht *DHT) {
 	// add if size is good
 	if size == 20 {
 		checkAndUpdateCache()
-
-		// else check cache
-
-		//  update cache if needed
-
 	} else if size < 20 {
 		// just add
 		add(dht, val, i)
@@ -135,33 +138,3 @@ func main() {
 	go add(dht, value, index)
 
 }
-
-
-3 lions, 3 buffaloes - L
-
-1 lion, | 0 buffulo -r
-
-2 lions , 3 buffaLOES - L
-
-2 LIONS = range
-
-3 BUFFLOES, 1 LION, 
-
-2 BUFFULOES, 2 LIONS 
-
-I LION, I BUFFULO,
-
-1 LION, 1 BUFFULO 
-
-
-
-
-
-
-1 BUFFULO ON LION
-
-
-
-
-
-
