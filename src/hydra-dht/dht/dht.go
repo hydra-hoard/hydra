@@ -35,22 +35,38 @@ type Cache struct {
 	table [][]cacheObject
 }
 
+// ping node to check livliness, if no reponse till 5 seconds, return dead node
 func ping(d_node node, cacheList *[]cacheObject, i int, pings chan int) {
 	
-	var bool := pb.Ping(node)
-	ob := cacheObject{lastTime: time.Now(), dead: true}
-	if(bool) {
-		// dead node false
-		cacheList[i] = ob
-	} else {
-		// dead node true
-		ob.dead = false
-		cacheList[i] = ob
-	}
+	c := make(chan int, 1)
 
-	pings <- 1
+	go func() {
+		var bool := pb.Ping(node)
+		ob := cacheObject{lastTime: time.Now(), dead: true}
+		if(bool) {
+			// dead node false
+			cacheList[i] = ob
+		} else {
+			// dead node true
+			ob.dead = false
+			cacheList[i] = ob
+		}
+		c <- 1 
+	}()
+
+	select {
+		case <- c:
+			pings <- 1
+
+		case <- time.After(timeDuration*time.Second):
+			ob := cacheObject{lastTime: time.Now(), dead: true}
+			ob.dead = false
+			cacheList[i] = ob
+			pings <- 1
+	}
 }
 
+// checks response for all nodes and returns after all nodes have responded
 func mergeAllPings(final chan int, pings chan int) {
 	for {
 		i += <- pings
@@ -62,6 +78,7 @@ func mergeAllPings(final chan int, pings chan int) {
 	}
 }
 
+// checkForDeadNodes checks for dead nodes in cache
 func checkForDeadNodes(cacheList *[]cacheObject) (bool,int){
 	for j, d_node := range cache.table[i] {
 		if d_node.dead == true {
@@ -73,6 +90,11 @@ func checkForDeadNodes(cacheList *[]cacheObject) (bool,int){
 	return false,-1
 }
 
+/* 
+   checkAndUpdateCache checks cache for dead nodes, if 
+   not found update pings of all nodes. Then check for
+   dead nodes, return index if any. Else return -1
+*/
 func checkAndUpdateCache(list []node, cacheList *[]cacheObject) int {
 	
 	var dead_nodes []node 
@@ -96,28 +118,44 @@ func checkAndUpdateCache(list []node, cacheList *[]cacheObject) int {
 	}
 
 	<- final
+
+	// return index of dead node
+	dead, i = checkForDeadNodes(cacheList)
+	if(dead) {
+		return i
+	}
+
+	return -1
 }
 
-func finalAdd(list chan node, i int, dht *DHT) {
+// FinalAdd adds nodes into index i of DHT and updates cache
+func FinalAdd(list chan node, i int, dht *DHT) {
 	val := <-list
 	// check size
 	size := len(dht.table[i])
 
-	// add if size is good
+	// adds if size is good
 	if size == 20 {
-		checkAndUpdateCache()
+		j:= checkAndUpdateCache()
+		if(j != -1) {
+			add(dht,val,i,j)
+		}
 	} else if size < 20 {
-		// just add
-		add(dht, val, i)
+		// just push into list
+		push(dht, val, i)
 	} else {
 		log.Fatal("SIZE IS GREATER THAN 20 !!")
 	}
-
 }
 
-func add(dht *DHT, val node, i int) {
+func push(dht *DHT, val node, i int) {
 	dht.table[i] = append(dht.table[i], val)
 }
+
+func add(dht *DHT, val node, i int,j int) {
+	dht.table[i][j] = val
+}
+
 
 func getIndex(nodeID string) int {
 	return 2
@@ -129,12 +167,13 @@ func main() {
 	dht := new(DHT)
 
 	for i := 0; i < totalIndex; i++ {
-		go finalAdd(dht.tableInputs[i], i, dht)
+		go FinalAdd(dht.tableInputs[i], i, dht)
 	}
 
-	value := node{domain: "127.0.0.1", port: "1100", nodeId: "11001"}
+	ue := node{domain: "127.0.0.1", port: "1100", nodeId: "11001"}
 	index := getIndex(value.nodeId)
 
-	go add(dht, value, index)
+	// adds a new node to the DHT
+	tableInputs[index] <- ue 
 
 }
