@@ -36,7 +36,7 @@ func (s *NodeServer) FindNodes(ctx context.Context, node *pb.Node) (*pb.CloserNo
 
 // Ping checks whether the node is lively or not
 func (s *NodeServer) Ping(ctx context.Context, node *pb.Node) (*pb.PingResponse, error) {
-	fmt.Printf("I got a Ping from machine : %v:%d", node.Domain, node.Port)
+	fmt.Printf("I got a Ping from machine : %v:%d \n", node.Domain, node.Port)
 	return &pb.PingResponse{Alive: true}, nil
 }
 
@@ -76,8 +76,9 @@ func StartServer() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterNodeDiscoveryServer(grpcServer, newServer())
 	// determine whether to use tls
-	grpcServer.Serve(lis)
 	dhtUtil.InitDHT(5)
+
+	grpcServer.Serve(lis)
 
 }
 
@@ -89,6 +90,7 @@ StartCLI starts up the client CLI, it's functionality includes
 func StartCLI() {
 	for {
 		reader := bufio.NewReader(os.Stdin)
+		color.Green("1. Ping a Node \n2. Add a Node Into HashTable")
 		color.Blue("Enter an option: ")
 		option, _ := reader.ReadString('\n')
 		option = strings.TrimSpace(option)
@@ -99,14 +101,22 @@ func StartCLI() {
 			port, _ := reader.ReadString('\n')
 			port = strings.TrimSpace(port)
 
-			dhtUtil.PingTest("127.0.0.1:"+port, &pb.Node{
+			livliness, _ := dhtUtil.PingTest("127.0.0.1:"+port, &pb.Node{
 				Domain: "127.0.0.1",
 				Port:   int32(*nodePort),
 				NodeId: "110010",
 			})
 
+			color.HiCyan("Response was: %v", livliness.GetAlive())
+
+		case "2":
+			color.Blue("You selected Add Node option")
+			color.Blue("Enter the node key ")
+			nodeId, _ := reader.ReadString('\n')
+			nodeId = strings.TrimSpace(nodeId)
+
+			dhtUtil.AddNode("127.0.0.1", 1200, nodeId)
 		}
-		// dhtUtil.AddNode("127.0.0.1", 1000, "110010")
 	}
 }
 

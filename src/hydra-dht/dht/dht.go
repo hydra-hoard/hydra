@@ -2,6 +2,7 @@ package dht
 
 import (
 	"context"
+	"fmt"
 	"log"
 	pb "protobuf/node"
 	"time"
@@ -15,8 +16,13 @@ var (
 	timeDurationInMinutes = 5.0
 	maxNodesInList        = 10
 	keySize               = 5
-	dht                   = new(DHT)
-	cache                 = new(Cache)
+	dht                   = &DHT{
+		tableInputs: make([]chan node, keySize),
+		table:       make([][]node, keySize, maxNodesInList),
+	}
+	cache = &Cache{
+		table: make([][]cacheObject, keySize, maxNodesInList),
+	}
 )
 
 type node struct {
@@ -123,7 +129,6 @@ func mergeAllPings(final chan int, pings chan int) {
 	i := 0
 	for {
 		i += <-pings
-
 		if i == maxNodesInList {
 			final <- 1
 			return
@@ -179,26 +184,32 @@ func checkAndUpdateCache(list []node, cacheList []cacheObject) int {
 }
 
 // FinalAdd adds nodes into index i of DHT and updates cache
-func FinalAdd(list chan node, i int) {
-	val := <-list
-	// check size
-	size := len(dht.table[i])
+func FinalAdd(list *chan node, i int) {
 
-	// adds if size is good
-	if size == maxNodesInList {
-		j := checkAndUpdateCache(dht.table[i], cache.table[i])
-		if j != -1 {
-			add(val, i, j)
+	for {
+		val := <-*list
+		fmt.Println("hey, got a node")
+		// check size
+		size := len(dht.table[i])
+
+		// adds if size is good
+		if size == maxNodesInList {
+			j := checkAndUpdateCache(dht.table[i], cache.table[i])
+			if j != -1 {
+				add(val, i, j)
+			}
+		} else if size < maxNodesInList {
+			// just push into list
+			push(val, i)
+		} else {
+			log.Fatal("Size Is Greater Than Max Number of Nodes !!")
 		}
-	} else if size < maxNodesInList {
-		// just push into list
-		push(val, i)
-	} else {
-		log.Fatal("Size Is Greater Than Max Number of Nodes !!")
 	}
+
 }
 
 func push(val node, i int) {
+	fmt.Println("Adding value into DHT")
 	dht.table[i] = append(dht.table[i], val)
 }
 
@@ -213,10 +224,13 @@ func getIndex(nodeID string) int {
 
 // InitDHT Initialises the DHT and setups listeners
 func InitDHT(bitSpace int) {
+
+	fmt.Println("Setting up listeners ")
 	keySize = bitSpace
 	// setting up listeners
 	for i := 0; i < keySize; i++ {
-		go FinalAdd(dht.tableInputs[i], i)
+		dht.tableInputs[i] = make(chan node)
+		go FinalAdd(&dht.tableInputs[i], i)
 	}
 }
 
