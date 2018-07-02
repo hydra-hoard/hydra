@@ -12,12 +12,14 @@ import (
 	"net"
 	"os"
 	pb "protobuf/node"
+	"strings"
 
+	"github.com/fatih/color"
 	"google.golang.org/grpc"
 )
 
 var (
-	port       = flag.Int("port", 10000, "The server port")
+	nodePort   = flag.Int("port", 10000, "The server port")
 	jsonDBFile = flag.String("json_db_file", "../testdata/closest_nodes.json", "A json file containing a list of features")
 )
 
@@ -34,8 +36,7 @@ func (s *NodeServer) FindNodes(ctx context.Context, node *pb.Node) (*pb.CloserNo
 
 // Ping checks whether the node is lively or not
 func (s *NodeServer) Ping(ctx context.Context, node *pb.Node) (*pb.PingResponse, error) {
-
-	fmt.Println("I got a Ping !!")
+	fmt.Printf("I got a Ping from machine : %v:%d", node.Domain, node.Port)
 	return &pb.PingResponse{Alive: true}, nil
 }
 
@@ -66,7 +67,8 @@ StartServer starts up the server for node and takes in
 */
 func StartServer() {
 	flag.Parse()
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *nodePort))
+	color.Red("Server listening at port : %d", *nodePort)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -76,6 +78,7 @@ func StartServer() {
 	// determine whether to use tls
 	grpcServer.Serve(lis)
 	dhtUtil.InitDHT(5)
+
 }
 
 /*
@@ -86,26 +89,28 @@ StartCLI starts up the client CLI, it's functionality includes
 func StartCLI() {
 	for {
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Println("Enter an option: ")
+		color.Blue("Enter an option: ")
 		option, _ := reader.ReadString('\n')
-
+		option = strings.TrimSpace(option)
 		switch option {
 		case "1":
-			fmt.Println("You selected Ping node ")
-			fmt.Println("Enter port number ")
+			color.Blue("You selected Ping node ")
+			color.Blue("Enter port number ")
 			port, _ := reader.ReadString('\n')
+			port = strings.TrimSpace(port)
+
 			dhtUtil.PingTest("127.0.0.1:"+port, &pb.Node{
 				Domain: "127.0.0.1",
-				Port:   1000,
+				Port:   int32(*nodePort),
 				NodeId: "110010",
 			})
 
 		}
-		dhtUtil.AddNode("127.0.0.1", 1000, "110010")
+		// dhtUtil.AddNode("127.0.0.1", 1000, "110010")
 	}
 }
 
 func main() {
-	StartServer()
+	go StartServer()
 	StartCLI()
 }
