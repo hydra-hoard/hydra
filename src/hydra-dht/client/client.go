@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"flag"
 	"log"
 	pb "protobuf/node"
@@ -44,7 +43,8 @@ func main() {
 
 	// Testing for Client
 	client := pb.NewNodeDiscoveryClient(conn)
-	nodeID := sha256.Sum256([]byte("hello world\n"))
-	FindNodes(client, &pb.Node{NodeId: nodeID[:], Port: 1000, Domain: "217.0.0.1"})
+	// nodeID := sha256.Sum256([]byte("hello world\n"))
+	nodeID := "110010"
+	FindNodes(client, &pb.Node{NodeId: nodeID, Port: 1000, Domain: "217.0.0.1"})
 
 }
