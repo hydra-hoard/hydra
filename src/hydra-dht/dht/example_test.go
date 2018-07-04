@@ -37,7 +37,11 @@ func TestAddNode(t *testing.T) {
 		case actual = <-channel:
 			if actual.ListIndex != test.listIndex ||
 				actual.Ping != test.ping || actual.Input != test.input {
-				t.Errorf("AddNode(%q) = %v;want %v", test.nodeId, actual.ListIndex, test.listIndex)
+				t.Errorf("AddNode(%q) => ||  (INDEX)= %v;want %v | (INPUT)= %v;want %v | (PING)= %v;want %v",
+					test.nodeId,
+					actual.ListIndex, test.listIndex,
+					actual.Input, test.input,
+					actual.Ping, test.ping)
 			}
 		case <-time.After(timeDurationInSeconds):
 			t.Errorf("Time Out error")
