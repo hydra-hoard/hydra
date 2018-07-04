@@ -51,8 +51,8 @@ func (s *NodeServer) loadFeatures(filePath string) {
 	}
 }
 
-// Returns a new server with stub data
-func newServer() *NodeServer {
+// Returns the server data structure with stub data
+func getDataStructure() *NodeServer {
 	s := &NodeServer{}
 	s.loadFeatures(*jsonDBFile)
 	return s
@@ -74,7 +74,7 @@ func StartServer() {
 	}
 
 	grpcServer := grpc.NewServer()
-	pb.RegisterNodeDiscoveryServer(grpcServer, newServer())
+	pb.RegisterNodeDiscoveryServer(grpcServer, getDataStructure())
 	// determine whether to use tls
 	dhtUtil.InitDHT(5)
 
