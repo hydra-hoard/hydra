@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	pb "protobuf/node"
+	"strconv"
 	"time"
 
 	"google.golang.org/grpc"
@@ -12,23 +13,38 @@ import (
 
 var (
 	serverKey             = "110010"
-	timeDurationInSeconds = 5 * time.Second
+	timeDuration          = 5 * time.Second
 	timeDurationInMinutes = 5.0
-	maxNodesInList        = 10
+	maxNodesInList        = 2
 	keySize               = 5
-	dht                   = &DHT{
-		tableInputs: make([]chan node, keySize),
-		table:       make([][]node, keySize, maxNodesInList),
+	dht                   = DHT{
+		tableInputs: make([]chan nodePacket, keySize),
+		table:       make([][]node, keySize),
 	}
-	cache = &Cache{
-		table: make([][]cacheObject, keySize, maxNodesInList),
+	cache = Cache{
+		table: make([][]cacheObject, keySize),
 	}
 )
+
+// AddNodeResponse is the reponse sent from AddNodes call
+// it returns the index in which the node was added
+// ping returns true if pings were called
+// input return true if node is added
+type AddNodeResponse struct {
+	ListIndex int
+	Ping      bool
+	Input     bool
+}
 
 type node struct {
 	domain string
 	port   int32
-	nodeId string
+	nodeID string
+}
+
+type nodePacket struct {
+	node         node
+	nodeResponse chan AddNodeResponse
 }
 
 type nodeChannel struct {
@@ -38,7 +54,7 @@ type nodeChannel struct {
 // DHT is the main Hash Table
 type DHT struct {
 	table       [][]node
-	tableInputs []chan node
+	tableInputs []chan nodePacket
 }
 
 type cacheObject struct {
@@ -46,6 +62,7 @@ type cacheObject struct {
 	dead     bool
 }
 
+// Cache stores the dead nodes cache
 type Cache struct {
 	table [][]cacheObject
 }
@@ -71,43 +88,42 @@ func PingTest(hostname string, dNode *pb.Node) (*pb.PingResponse, error) {
 	client, conn := getNodeClient(&hostname)
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeDurationInSeconds)
+	ctx, cancel := context.WithTimeout(context.Background(), timeDuration)
 	defer cancel()
 	livliness, err := client.Ping(ctx, dNode)
 
 	return livliness, err
 }
 
-// ping node to check livliness, if no response till 5 seconds, return dead node
-func ping(dNode node, cacheList []cacheObject, i int, pings chan int) {
-
+// Ping node to check livliness, if no response till 5 seconds, return dead node
+func Ping(dNode node, cacheList *[]cacheObject, i int, pings chan int) {
 	c := make(chan int, 1)
 
 	go func() {
-
-		client, conn := getNodeClient(&dNode.domain)
+		hostname := dNode.domain + ":" + strconv.Itoa(int(dNode.port))
+		client, conn := getNodeClient(&hostname)
 		defer conn.Close()
 
-		ctx, cancel := context.WithTimeout(context.Background(), timeDurationInSeconds)
+		ctx, cancel := context.WithTimeout(context.Background(), timeDuration)
 		defer cancel()
 		livliness, err := client.Ping(ctx, &pb.Node{
-			NodeId: dNode.nodeId,
+			NodeId: dNode.nodeID,
 			Domain: dNode.domain,
 			Port:   dNode.port,
 		})
+		ob := cacheObject{lastTime: time.Now(), dead: false}
 
 		if err != nil {
-			log.Fatalf("%v.Ping(_) = _, %v: ", client, err)
-		}
-
-		ob := cacheObject{lastTime: time.Now(), dead: true}
-		if livliness.Alive {
+			// log.Fatalf("%v.Ping(_) = _, %v: ", client, err)
+			ob.dead = true
+			(*cacheList)[i] = ob
+		} else if livliness.Alive {
 			// dead node false
-			cacheList[i] = ob
+			(*cacheList)[i] = ob
 		} else {
 			// dead node true
-			ob.dead = false
-			cacheList[i] = ob
+			ob.dead = true
+			(*cacheList)[i] = ob
 		}
 		c <- 1
 	}()
@@ -116,10 +132,10 @@ func ping(dNode node, cacheList []cacheObject, i int, pings chan int) {
 	case <-c:
 		pings <- 1
 
-	case <-time.After(timeDurationInSeconds):
+	case <-time.After(timeDuration):
 		ob := cacheObject{lastTime: time.Now(), dead: true}
 		ob.dead = false
-		cacheList[i] = ob
+		(*cacheList)[i] = ob
 		pings <- 1
 	}
 }
@@ -137,14 +153,15 @@ func mergeAllPings(final chan int, pings chan int) {
 }
 
 // checkForDeadNodes checks for dead nodes in cache
-func checkForDeadNodes(cacheList []cacheObject) (bool, int) {
-	for j, d_node := range cacheList {
-		if d_node.dead == true {
+func checkForDeadNodes(cacheList *[]cacheObject) (bool, int) {
+
+	for j, dNode := range *cacheList {
+		fmt.Println(dNode.dead)
+		if dNode.dead == true {
 			// indicate to all nodes to finsh their go functions
 			return true, j
 		}
 	}
-
 	return false, -1
 }
 
@@ -153,73 +170,91 @@ func checkForDeadNodes(cacheList []cacheObject) (bool, int) {
    not found update pings of all nodes. Then check for
    dead nodes, return index if any. Else return -1
 */
-func checkAndUpdateCache(list []node, cacheList []cacheObject) int {
-
+func checkAndUpdateCache(list *[]node, cacheList *[]cacheObject) (int, bool) {
+	ping := false
 	dead, i := checkForDeadNodes(cacheList)
 
 	if dead {
-		return i
+		return i, ping
 	}
+	ping = true
 
-	var final chan int
-	var pings chan int
+	final := make(chan int)
+	pings := make(chan int)
 
 	go mergeAllPings(final, pings)
 
-	for j, dNode := range cacheList {
-		if time.Since(dNode.lastTime).Minutes() > timeDurationInMinutes {
-			go ping(list[j], cacheList, j, pings)
-		}
+	for j := range *cacheList {
+		go Ping((*list)[j], cacheList, j, pings)
+		// if time.Since(dNode.lastTime).Minutes() > timeDurationInMinutes {
+		// 	go Ping(list[j], cacheList, j, pings)
+		// }
 	}
 
 	<-final
-
 	// return index of dead node
 	dead, i = checkForDeadNodes(cacheList)
 	if dead {
-		return i
+		return i, ping
 	}
 
-	return -1
+	return -1, ping
 }
 
 // FinalAdd adds nodes into index i of DHT and updates cache
-func FinalAdd(list *chan node, i int) {
+func FinalAdd(list *chan nodePacket, i int) {
 
 	for {
 		val := <-*list
-		fmt.Println("hey, got a node")
+		response := AddNodeResponse{Ping: false, Input: false, ListIndex: i}
+
 		// check size
 		size := len(dht.table[i])
-
 		// adds if size is good
 		if size == maxNodesInList {
-			j := checkAndUpdateCache(dht.table[i], cache.table[i])
+			j, ping := checkAndUpdateCache(&dht.table[i], &cache.table[i])
+
+			response.Ping = ping
+
 			if j != -1 {
-				add(val, i, j)
+				add(val.node, i, j)
+				response.Input = true
 			}
 		} else if size < maxNodesInList {
 			// just push into list
-			push(val, i)
+			push(val.node, i)
+			response.Input = true
+
 		} else {
 			log.Fatal("Size Is Greater Than Max Number of Nodes !!")
 		}
+
+		val.nodeResponse <- response
 	}
 
 }
 
 func push(val node, i int) {
-	fmt.Println("Adding value into DHT")
+	cacheVal := cacheObject{lastTime: time.Now(), dead: false}
 	dht.table[i] = append(dht.table[i], val)
+	cache.table[i] = append(cache.table[i], cacheVal)
 }
 
 func add(val node, i int, j int) {
+	cacheVal := cacheObject{lastTime: time.Now(), dead: false}
 	dht.table[i][j] = val
+	cache.table[i][j] = cacheVal
 }
 
 // getIndex gets index of list of nodes of DHT to get for given key
 func getIndex(nodeID string) int {
-	return 2
+	//TODO
+	for i := 0; i < keySize; i++ {
+		if nodeID[i] != serverKey[i] {
+			return i
+		}
+	}
+	return -1
 }
 
 // InitDHT Initialises the DHT and setups listeners
@@ -229,16 +264,24 @@ func InitDHT(bitSpace int) {
 	keySize = bitSpace
 	// setting up listeners
 	for i := 0; i < keySize; i++ {
-		dht.tableInputs[i] = make(chan node)
+		dht.tableInputs[i] = make(chan nodePacket)
 		go FinalAdd(&dht.tableInputs[i], i)
 	}
 }
 
 // AddNode adds a new node into DHT
-func AddNode(domain string, port int32, nodeID string) {
-	value := node{domain: domain, port: port, nodeId: nodeID}
-	index := getIndex(value.nodeId)
+func AddNode(domain string, port int32, nodeID string) chan AddNodeResponse {
 
-	// adds a new node to the DHT
+	nodeResponse := make(chan AddNodeResponse)
+	value := nodePacket{node: node{
+		domain: domain,
+		port:   port,
+		nodeID: nodeID,
+	},
+		nodeResponse: nodeResponse,
+	}
+	index := getIndex(value.node.nodeID)
 	dht.tableInputs[index] <- value
+
+	return nodeResponse
 }
