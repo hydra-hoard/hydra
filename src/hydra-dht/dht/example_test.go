@@ -10,7 +10,7 @@ func TestAddNode(t *testing.T) {
 
 	dht.InitDHT(5)
 
-	timeDurationInSeconds := 5 * time.Second
+	timeDurationInSeconds := 1 * time.Second
 	// DHT Parameters
 
 	//nodeKey := "11000"
@@ -25,10 +25,9 @@ func TestAddNode(t *testing.T) {
 		{"01000", 0, false, true},
 		{"01100", 0, false, true},
 		{"01110", 0, true, true},
-		{"11110", 3, false, true},
-		{"11100", 3, false, true},
-		{"11101", 3, true, true},
-		{"01100", 0, false, false},
+		{"11110", 2, false, true},
+		{"11100", 2, false, true},
+		{"11101", 2, true, true},
 	}
 	for _, test := range tests {
 		channel := dht.AddNode("127.0.0.1", 80, test.nodeId)
