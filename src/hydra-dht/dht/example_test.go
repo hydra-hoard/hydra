@@ -9,8 +9,6 @@ import (
 func TestAddNode(t *testing.T) {
 
 	dht.InitDHT(5)
-
-	timeDurationInSeconds := 1 * time.Second
 	// DHT Parameters
 
 	//nodeKey := "11000"
@@ -31,9 +29,8 @@ func TestAddNode(t *testing.T) {
 	}
 	for _, test := range tests {
 		channel := dht.AddNode("127.0.0.1", 80, test.nodeId)
-		var actual dht.AddNodeResponse
 		select {
-		case actual = <-channel:
+		case actual := <-channel:
 			if actual.ListIndex != test.listIndex ||
 				actual.Ping != test.ping || actual.Input != test.input {
 				t.Errorf("AddNode(%q) => ||  (INDEX)= %v;want %v | (INPUT)= %v;want %v | (PING)= %v;want %v",
@@ -42,7 +39,7 @@ func TestAddNode(t *testing.T) {
 					actual.Input, test.input,
 					actual.Ping, test.ping)
 			}
-		case <-time.After(timeDurationInSeconds):
+		case <-time.After(time.Second * 1):
 			t.Errorf("Time Out error")
 		}
 	}

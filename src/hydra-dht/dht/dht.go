@@ -24,7 +24,6 @@ var (
 	cache = Cache{
 		table: make([][]cacheObject, keySize),
 	}
-	Count int = 1
 )
 
 // AddNodeResponse is the reponse sent from AddNodes call
@@ -126,13 +125,11 @@ func Ping(dNode node, cacheList *[]cacheObject, i int, pings chan int) {
 			ob.dead = true
 			(*cacheList)[i] = ob
 		}
-		fmt.Println("sending C !")
 		c <- 1
 	}()
 
 	select {
 	case <-c:
-		fmt.Println("got C !")
 		pings <- 1
 
 	case <-time.After(timeDuration):
@@ -148,7 +145,6 @@ func mergeAllPings(final chan int, pings chan int) {
 	i := 0
 	for {
 		i += <-pings
-		fmt.Println("PING FROM MERGE PING")
 		if i == maxNodesInList {
 			final <- 1
 			return
@@ -196,7 +192,6 @@ func checkAndUpdateCache(list *[]node, cacheList *[]cacheObject) (int, bool) {
 	}
 
 	<-final
-	fmt.Println("I've got FINAL")
 	// return index of dead node
 	dead, i = checkForDeadNodes(cacheList)
 	if dead {
@@ -217,7 +212,6 @@ func FinalAdd(list *chan nodePacket, i int) {
 		size := len(dht.table[i])
 		// adds if size is good
 		if size == maxNodesInList {
-			fmt.Println("Size is maximum !")
 			j, ping := checkAndUpdateCache(&dht.table[i], &cache.table[i])
 
 			response.Ping = ping
