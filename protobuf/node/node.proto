@@ -9,8 +9,7 @@ service NodeDiscovery {
 
 message Node {
     // 256 bit node identification number
-    // repeated int32 nodeId = 1;
-    string nodeId = 1;
+    bytes nodeId = 1;
     // domain of that node
     string domain = 2;
     // port of the node
