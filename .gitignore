@@ -1,12 +1,3 @@
-
-# Hydra Specific #
-###################
-bin/
-pkg/
-/src/*
-!/src/hydra-dht
-!/src/protobuf
-
 # Compiled source #
 ###################
 *.pb.go
