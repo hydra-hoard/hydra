@@ -6,6 +6,9 @@ pkg/
 /src/*
 !/src/hydra-dht
 !/src/protobuf
+!Dockerfile
+!.dockerignore
+!build.sh
 
 # Compiled source #
 ###################
