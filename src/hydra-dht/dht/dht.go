@@ -3,8 +3,8 @@ package dht
 import (
 	"context"
 	"fmt"
+	pb "hydra-dht/protobuf/node"
 	"log"
-	pb "protobuf/node"
 	"strconv"
 	"time"
 
@@ -156,7 +156,6 @@ func mergeAllPings(final chan int, pings chan int) {
 func checkForDeadNodes(cacheList *[]cacheObject) (bool, int) {
 
 	for j, dNode := range *cacheList {
-		fmt.Println(dNode.dead)
 		if dNode.dead == true {
 			// indicate to all nodes to finsh their go functions
 			return true, j

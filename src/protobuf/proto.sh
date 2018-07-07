@@ -1,1 +1,0 @@
-protoc -I . node/node.proto --go_out=plugins=grpc:.

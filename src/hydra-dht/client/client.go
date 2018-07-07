@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"flag"
+	pb "hydra-dht/protobuf/node"
 	"log"
-	pb "protobuf/node"
 	"time"
 
 	"google.golang.org/grpc"

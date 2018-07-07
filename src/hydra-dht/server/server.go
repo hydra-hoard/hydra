@@ -7,11 +7,11 @@ import (
 	"flag"
 	"fmt"
 	dhtUtil "hydra-dht/dht"
+	pb "hydra-dht/protobuf/node"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
-	pb "protobuf/node"
 	"strings"
 
 	"github.com/fatih/color"
