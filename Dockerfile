@@ -5,4 +5,4 @@ COPY . .
 
 RUN sh build.sh
 
-CMD ["go","test","hydra-dht/dht/"]
+CMD ["sh","run.sh"]

@@ -54,7 +54,6 @@ func (s *NodeServer) loadFeatures(filePath string) {
 // Returns the server data structure with stub data
 func getDataStructure() *NodeServer {
 	s := &NodeServer{}
-	s.loadFeatures(*jsonDBFile)
 	return s
 }
 
@@ -115,7 +114,7 @@ func StartCLI() {
 			nodeId, _ := reader.ReadString('\n')
 			nodeId = strings.TrimSpace(nodeId)
 
-			dhtUtil.AddNode("127.0.0.1", 1200, nodeId)
+			dhtUtil.AddNode("127.0.0.1", 80, "11001")
 		}
 	}
 }

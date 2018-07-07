@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	serverKey             = "110010"
+	serverKey             = "11000"
 	timeDuration          = 5 * time.Second
 	timeDurationInMinutes = 5.0
 	maxNodesInList        = 2
@@ -156,6 +156,7 @@ func mergeAllPings(final chan int, pings chan int) {
 func checkForDeadNodes(cacheList *[]cacheObject) (bool, int) {
 
 	for j, dNode := range *cacheList {
+		fmt.Println(dNode.dead)
 		if dNode.dead == true {
 			// indicate to all nodes to finsh their go functions
 			return true, j
@@ -234,12 +235,14 @@ func FinalAdd(list *chan nodePacket, i int) {
 }
 
 func push(val node, i int) {
+	fmt.Println("Node added !")
 	cacheVal := cacheObject{lastTime: time.Now(), dead: false}
 	dht.table[i] = append(dht.table[i], val)
 	cache.table[i] = append(cache.table[i], cacheVal)
 }
 
 func add(val node, i int, j int) {
+	fmt.Println("Node added !")
 	cacheVal := cacheObject{lastTime: time.Now(), dead: false}
 	dht.table[i][j] = val
 	cache.table[i][j] = cacheVal
