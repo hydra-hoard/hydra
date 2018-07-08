@@ -76,7 +76,7 @@ func StartServer() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterNodeDiscoveryServer(grpcServer, getDataStructure())
 	// determine whether to use tls
-	dhtUtil.InitDHT(5)
+	dhtUtil.InitDHT(2)
 
 	grpcServer.Serve(lis)
 
