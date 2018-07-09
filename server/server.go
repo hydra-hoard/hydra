@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/fatih/color"
 	"google.golang.org/grpc"
@@ -75,7 +76,7 @@ func StartServer() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterNodeDiscoveryServer(grpcServer, getDataStructure())
 	// determine whether to use tls
-	dhtUtil.InitDHT(5)
+	dhtUtil.InitDHT(2)
 
 	grpcServer.Serve(lis)
 
@@ -100,13 +101,13 @@ func StartCLI() {
 			port, _ := reader.ReadString('\n')
 			port = strings.TrimSpace(port)
 
-			livliness, _ := dhtUtil.PingTest("127.0.0.1:"+port, &pb.Node{
-				Domain: "127.0.0.1",
-				Port:   int32(*nodePort),
-				NodeId: "110010",
-			})
-
-			color.HiCyan("Response was: %v", livliness.GetAlive())
+			// livliness, _ := dhtUtil.PingTest("127.0.0.1:"+port, &pb.Node{
+			// 	Domain: "127.0.0.1",
+			// 	Port:   int32(*nodePort),
+			// 	NodeId: "110010",
+			// })
+			//
+			// color.HiCyan("Response was: %v", livliness.GetAlive())
 
 		case "2":
 			color.Blue("You selected Add Node option")
@@ -114,7 +115,16 @@ func StartCLI() {
 			nodeId, _ := reader.ReadString('\n')
 			nodeId = strings.TrimSpace(nodeId)
 
-			dhtUtil.AddNode("127.0.0.1", 80, "11001")
+			channel, _ := dhtUtil.AddNode("127.0.0.1", 80, nodeId)
+
+			select {
+			case actual := <-channel:
+				fmt.Println(actual.ListIndex)
+				fmt.Println(actual.Ping)
+				fmt.Println(actual.Input)
+			case <-time.After(time.Second * 1):
+				fmt.Println("Time Out error")
+			}
 		}
 	}
 }

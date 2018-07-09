@@ -3,8 +3,12 @@ package dht
 import (
 	"context"
 	"fmt"
+	"hydra-dht/constants"
+	nodedetails "hydra-dht/nodedetails"
 	pb "hydra-dht/protobuf/node"
+	structures "hydra-dht/structures"
 	"log"
+	"math/bits"
 	"strconv"
 	"time"
 
@@ -12,62 +16,30 @@ import (
 )
 
 var (
-	serverKey             = "11000"
-	timeDuration          = 5 * time.Second
-	timeDurationInMinutes = 5.0
-	maxNodesInList        = 2
-	keySize               = 5
-	dht                   = DHT{
-		tableInputs: make([]chan nodePacket, keySize),
-		table:       make([][]node, keySize),
-	}
-	cache = Cache{
-		table: make([][]cacheObject, keySize),
-	}
+	dht                structures.DHT
+	channels           structures.IndexChannels
+	cache              structures.Cache
+	bucketSize         = 0
+	cacheExpiryMinutes = 1.0
 )
 
-// AddNodeResponse is the reponse sent from AddNodes call
-// it returns the index in which the node was added
-// ping returns true if pings were called
-// input return true if node is added
-type AddNodeResponse struct {
-	ListIndex int
-	Ping      bool
-	Input     bool
+// Appends to list of nodes of DHT's row
+func addInDHT(n *structures.Node, row int) {
+	fmt.Println("Added node into DHT")
+	fmt.Println(n)
+
+	updateDHT(row, -1, n)
+	updateCache(row, -1, false)
 }
 
-type node struct {
-	domain string
-	port   int32
-	nodeID string
+// Replace in list of nodes of DHT's row
+func replaceInDHT(n *structures.Node, row int, replaced int) {
+
+	updateDHT(row, replaced, n)
+	updateCache(row, replaced, false)
 }
 
-type nodePacket struct {
-	node         node
-	nodeResponse chan AddNodeResponse
-}
-
-type nodeChannel struct {
-	channel chan node
-}
-
-// DHT is the main Hash Table
-type DHT struct {
-	table       [][]node
-	tableInputs []chan nodePacket
-}
-
-type cacheObject struct {
-	lastTime time.Time
-	dead     bool
-}
-
-// Cache stores the dead nodes cache
-type Cache struct {
-	table [][]cacheObject
-}
-
-// get node LCinet sets up connection
+// get node Client sets up connection
 func getNodeClient(serverAddress *string) (pb.NodeDiscoveryClient, *grpc.ClientConn) {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure())
@@ -83,48 +55,35 @@ func getNodeClient(serverAddress *string) (pb.NodeDiscoveryClient, *grpc.ClientC
 	return client, conn
 }
 
-// PingTest tests the Ping functionality
-func PingTest(hostname string, dNode *pb.Node) (*pb.PingResponse, error) {
+//Ping makes a GRPC call to node and gets response
+func Ping(n structures.Node) (*pb.PingResponse, error) {
+	hostname := n.Domain + ":" + strconv.Itoa(int(n.Port))
 	client, conn := getNodeClient(&hostname)
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeDuration)
+	ctx, cancel := context.WithTimeout(context.Background(), constants.TIME_DURATION)
 	defer cancel()
-	livliness, err := client.Ping(ctx, dNode)
+	livliness, err := client.Ping(ctx, &pb.Node{
+		NodeId: nodedetails.MyNode.Key[:],
+		Domain: n.Domain,
+		Port:   int32(n.Port),
+	})
 
 	return livliness, err
 }
 
-// Ping node to check livliness, if no response till 5 seconds, return dead node
-func Ping(dNode node, cacheList *[]cacheObject, i int, pings chan int) {
+// pingNode pings the node if no response till 5 seconds, return dead node
+func pingNode(n structures.Node, pings chan int, row int, col int) {
 	c := make(chan int, 1)
 
 	go func() {
-		hostname := dNode.domain + ":" + strconv.Itoa(int(dNode.port))
-		client, conn := getNodeClient(&hostname)
-		defer conn.Close()
+		livliness, err := Ping(n)
+		dead := false
 
-		ctx, cancel := context.WithTimeout(context.Background(), timeDuration)
-		defer cancel()
-		livliness, err := client.Ping(ctx, &pb.Node{
-			NodeId: dNode.nodeID,
-			Domain: dNode.domain,
-			Port:   dNode.port,
-		})
-		ob := cacheObject{lastTime: time.Now(), dead: false}
-
-		if err != nil {
-			// log.Fatalf("%v.Ping(_) = _, %v: ", client, err)
-			ob.dead = true
-			(*cacheList)[i] = ob
-		} else if livliness.Alive {
-			// dead node false
-			(*cacheList)[i] = ob
-		} else {
-			// dead node true
-			ob.dead = true
-			(*cacheList)[i] = ob
+		if err != nil || !livliness.Alive {
+			dead = true
 		}
+		updateCache(row, col, dead)
 		c <- 1
 	}()
 
@@ -132,10 +91,8 @@ func Ping(dNode node, cacheList *[]cacheObject, i int, pings chan int) {
 	case <-c:
 		pings <- 1
 
-	case <-time.After(timeDuration):
-		ob := cacheObject{lastTime: time.Now(), dead: true}
-		ob.dead = false
-		(*cacheList)[i] = ob
+	case <-time.After(constants.TIME_DURATION):
+		updateCache(row, col, false)
 		pings <- 1
 	}
 }
@@ -145,24 +102,30 @@ func mergeAllPings(final chan int, pings chan int) {
 	i := 0
 	for {
 		i += <-pings
-		if i == maxNodesInList {
+		if i == bucketSize {
 			final <- 1
 			return
 		}
 	}
 }
 
-// checkForDeadNodes checks for dead nodes in cache
-func checkForDeadNodes(cacheList *[]cacheObject) (bool, int) {
-
-	for j, dNode := range *cacheList {
-		fmt.Println(dNode.dead)
-		if dNode.dead == true {
-			// indicate to all nodes to finsh their go functions
-			return true, j
+// checkForDeadNodes checks if there are any dead nodes from previous pings
+func checkForDeadNodes(row int) (bool, int) {
+	for i := 0; i < len(dht.Lists[row]); i++ {
+		if getCacheVal(row, i).Dead == true {
+			return true, i
 		}
 	}
 	return false, -1
+}
+
+// isNodeOld checks if node has expired in cache.
+func isNodeOld(row int, col int) bool {
+
+	if time.Since(getCacheVal(row, col).LastTime).Minutes() >= cacheExpiryMinutes {
+		return true
+	}
+	return false
 }
 
 /*
@@ -170,120 +133,172 @@ func checkForDeadNodes(cacheList *[]cacheObject) (bool, int) {
    not found update pings of all nodes. Then check for
    dead nodes, return index if any. Else return -1
 */
-func checkAndUpdateCache(list *[]node, cacheList *[]cacheObject) (int, bool) {
+func checkAndUpdateCache(row int) (int, bool) {
 	ping := false
-	dead, i := checkForDeadNodes(cacheList)
+	dead, i := checkForDeadNodes(row)
 
 	if dead {
 		return i, ping
 	}
-	ping = true
 
+	ping = true
 	final := make(chan int)
 	pings := make(chan int)
 
 	go mergeAllPings(final, pings)
 
-	for j := range *cacheList {
-		go Ping((*list)[j], cacheList, j, pings)
-		// if time.Since(dNode.lastTime).Minutes() > timeDurationInMinutes {
-		// 	go Ping(list[j], cacheList, j, pings)
-		// }
+	for i := 0; i < len(dht.Lists[row]); i++ {
+
+		if isNodeOld(row, i) {
+			go pingNode(dht.Lists[row][i], pings, row, i)
+		} else {
+			pings <- 1
+		}
 	}
 
+	//waiting for mergeAllPings to complete
 	<-final
+
 	// return index of dead node
-	dead, i = checkForDeadNodes(cacheList)
+	dead, i = checkForDeadNodes(row)
+	fmt.Println(dead, i)
 	if dead {
 		return i, ping
 	}
-
 	return -1, ping
 }
 
-// FinalAdd adds nodes into index i of DHT and updates cache
-func FinalAdd(list *chan nodePacket, i int) {
-
+//Listeners listens for add node requests for a particular i
+// i denotes a row of the DHT
+func Listeners(i int) {
 	for {
-		val := <-*list
-		response := AddNodeResponse{Ping: false, Input: false, ListIndex: i}
-
-		// check size
-		size := len(dht.table[i])
-		// adds if size is good
-		if size == maxNodesInList {
-			j, ping := checkAndUpdateCache(&dht.table[i], &cache.table[i])
-
-			response.Ping = ping
-
-			if j != -1 {
-				add(val.node, i, j)
+		nodePacket := <-channels.WriteChannel[i]
+		response := structures.AddNodeResponse{Ping: false, Input: false, ListIndex: i}
+		n := &(nodePacket.Node)
+		new, j := checkIfNew(n, i)
+		if new {
+			if len(dht.Lists[i]) < bucketSize {
+				addInDHT(n, i)
 				response.Input = true
+			} else {
+				j, ping := checkAndUpdateCache(i)
+				response.Ping = ping
+
+				if j != -1 {
+					replaceInDHT(n, i, j)
+					response.Input = true
+				}
 			}
-		} else if size < maxNodesInList {
-			// just push into list
-			push(val.node, i)
-			response.Input = true
-
 		} else {
-			log.Fatal("Size Is Greater Than Max Number of Nodes !!")
+			fmt.Println("Node exists!!")
+			updateCache(i, j, false)
+			response = structures.AddNodeResponse{
+				ListIndex: -1,
+				Ping:      false,
+				Input:     false,
+			}
 		}
-
-		val.nodeResponse <- response
+		nodePacket.NodeResponse <- response
 	}
-
 }
 
-func push(val node, i int) {
-	fmt.Println("Node added !")
-	cacheVal := cacheObject{lastTime: time.Now(), dead: false}
-	dht.table[i] = append(dht.table[i], val)
-	cache.table[i] = append(cache.table[i], cacheVal)
+// Sends value of node over to a particular row listener of DHT
+func routeToDHTRow(nodePacket *structures.NodePacket, row int) {
+	channels.WriteChannel[row] <- nodePacket
 }
 
-func add(val node, i int, j int) {
-	fmt.Println("Node added !")
-	cacheVal := cacheObject{lastTime: time.Now(), dead: false}
-	dht.table[i][j] = val
-	cache.table[i][j] = cacheVal
-}
-
-// getIndex gets index of list of nodes of DHT to get for given key
-func getIndex(nodeID string) int {
-	//TODO
-	for i := 0; i < keySize; i++ {
-		if nodeID[i] != serverKey[i] {
-			return i
+func checkIfNew(n *structures.Node, row int) (bool, int) {
+	for i := 0; i < len(dht.Lists[row]); i++ {
+		existing := getDHTVal(row, i)
+		if existing.Key == n.Key {
+			return false, i
 		}
 	}
-	return -1
+	return true, -1
 }
 
-// InitDHT Initialises the DHT and setups listeners
-func InitDHT(bitSpace int) {
+// GetRowNum is used to find the list number where the node is to be stored in the DHT
+// Node is the structure for the incoming node
+func GetRowNum(n *structures.Node) int {
+	for i := 0; i < constants.NUM_BYTES; i++ {
+		val := uint8(nodedetails.MyNode.Key[i] ^ n.Key[i])
+		if val != 0 {
+			return 8*i + bits.LeadingZeros8(val)
+		}
+	}
+	return 1
+}
 
-	fmt.Println("Setting up listeners ")
-	keySize = bitSpace
-	// setting up listeners
-	for i := 0; i < keySize; i++ {
-		dht.tableInputs[i] = make(chan nodePacket)
-		go FinalAdd(&dht.tableInputs[i], i)
+// Updates value in cache to signify nodes livliness status
+func updateCache(row int, col int, status bool) {
+	c := structures.CacheObject{LastTime: time.Now(), Dead: status}
+	if col == -1 {
+		cache.Lists[row] = append(cache.Lists[row], c)
+	} else {
+		cache.Lists[row][col] = c
 	}
 }
 
-// AddNode adds a new node into DHT
-func AddNode(domain string, port int32, nodeID string) chan AddNodeResponse {
-
-	nodeResponse := make(chan AddNodeResponse)
-	value := nodePacket{node: node{
-		domain: domain,
-		port:   port,
-		nodeID: nodeID,
-	},
-		nodeResponse: nodeResponse,
+//storeDHT stores value into DHT. If col is -1 , it appends to the list of DHT
+func updateDHT(row int, col int, n *structures.Node) {
+	if col == -1 {
+		dht.Lists[row] = append(dht.Lists[row], *n)
+	} else {
+		dht.Lists[row][col] = *n
 	}
-	index := getIndex(value.node.nodeID)
-	dht.tableInputs[index] <- value
+}
 
-	return nodeResponse
+func getDHTVal(row int, col int) structures.Node {
+	return dht.Lists[row][col]
+}
+
+func getCacheVal(row int, col int) structures.CacheObject {
+	return cache.Lists[row][col]
+}
+
+// compute verifies the node so that it doesn't add an already inserted node
+func compute(nodePacket *structures.NodePacket) {
+	n := &nodePacket.Node
+	row := GetRowNum(n)
+	routeToDHTRow(nodePacket, row)
+}
+
+func computeByte(key string) (uint8, error) {
+	i, err := strconv.ParseUint(key, 2, 8)
+	return uint8(i), err
+}
+
+// AddNode Adds the node into DHT and return Response indicating status
+func AddNode(domain string, port int, firstNodeIDByteString string) (chan structures.AddNodeResponse, error) {
+
+	firstByte, err := computeByte(firstNodeIDByteString)
+	if err != nil {
+		return nil, err
+	}
+
+	nodeResponse := make(chan structures.AddNodeResponse)
+	value := structures.NodePacket{
+		Node: structures.Node{
+			Domain: domain,
+			Port:   port,
+			Key:    structures.NodeID{firstByte, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124},
+		},
+		NodeResponse: nodeResponse,
+	}
+
+	go compute(&value)
+
+	return nodeResponse, err
+}
+
+//InitDHT Initializes the Data structures required by the DHT
+//size is the max number of nodes that can be saved in a list
+func InitDHT(size int, timeoutForCache float64) {
+	cacheExpiryMinutes = timeoutForCache
+	bucketSize = size
+	// Setting up DHT listeners
+	for i := 0; i < constants.HASH_SIZE; i++ {
+		channels.WriteChannel[i] = make(chan *structures.NodePacket)
+		go Listeners(i)
+	}
 }

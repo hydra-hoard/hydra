@@ -8,27 +8,43 @@ import (
 
 func TestAddNode(t *testing.T) {
 
-	dht.InitDHT(5)
-	// DHT Parameters
-
-	//nodeKey := "11000"
+	//nodeKey := "1111111"
 	//maxNodeInList := 2
+
+	dht.InitDHT(2, .01)
 
 	var tests = []struct {
 		nodeId    string
 		listIndex int
 		ping      bool
 		input     bool
+		sleep     bool
 	}{
-		{"01000", 0, false, true},
-		{"01100", 0, false, true},
-		{"01110", 0, true, true},
-		{"11110", 2, false, true},
-		{"11100", 2, false, true},
-		{"11101", 2, true, true},
+		// All ping responses will yield dead nodes.
+		// TODO mock ping response
+		{"01111111", 0, false, true, false}, //testing list index
+		{"01111110", 0, false, true, false},
+		{"01111101", 0, true, true, true},     // testing list full
+		{"01111101", -1, false, false, false}, //testing repeat node
+		{"11011111", 2, false, true, false},
+		{"11011101", 2, false, true, false},
+		{"11011101", -1, false, false, false},     // testing list full
+		{"101010101010", -1, false, false, false}, // testing rubbish nodeid
 	}
 	for _, test := range tests {
-		channel := dht.AddNode("127.0.0.1", 80, test.nodeId)
+		if test.sleep {
+			time.Sleep(1 * time.Second)
+		}
+		channel, err := dht.AddNode("127.0.0.1", 80, test.nodeId)
+
+		if err != nil {
+
+			if test.nodeId == "101010101010" {
+				continue
+			} else {
+				t.Errorf("%v", err)
+			}
+		}
 		select {
 		case actual := <-channel:
 			if actual.ListIndex != test.listIndex ||
@@ -46,6 +62,6 @@ func TestAddNode(t *testing.T) {
 
 }
 
-func TestInitDHT(t *testing.T) {
+func TestComputeByte(t *testing.T) {
 
 }
