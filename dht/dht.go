@@ -180,7 +180,7 @@ func Listeners(i int) {
 			if len(dht.Lists[i]) < bucketSize {
 				addInDHT(n, i)
 				response.Input = true
-			} else {
+			} else if len(dht.Lists[i]) == bucketSize {
 				j, ping := checkAndUpdateCache(i)
 				response.Ping = ping
 
@@ -188,6 +188,8 @@ func Listeners(i int) {
 					replaceInDHT(n, i, j)
 					response.Input = true
 				}
+			} else {
+				panic("The bucket has more elements than bucket size !")
 			}
 		} else {
 			fmt.Println("Node exists!!")

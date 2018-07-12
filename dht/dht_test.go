@@ -10,7 +10,7 @@ func TestAddNode(t *testing.T) {
 
 	//nodeKey := "1111111"
 	//maxNodeInList := 2
-
+	// time out 0.6 seconds
 	dht.InitDHT(2, .01)
 
 	var tests = []struct {
