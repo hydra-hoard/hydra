@@ -17,8 +17,19 @@ var (
 )
 
 /*
+convertNumberToBytes is a helper function to AppendToLog. It converts a uint64 number
+to a byte array . The size of byte array is 10. This is required to keep track of size of
+logObject in the log as that object can be of any size.
 
- */
+Hence , we first store the size of log Object in bytes, and then store the byte representation
+of the Log Object.
+
+Arguments:
+1. i = The uint64 number , the size of logObject
+Returns
+1. byte[] = THe byte array representation of i
+2. int = The actual number of bytes , the number i took. The max number of bytes it can take is 10
+*/
 func convertNumberToBytes(i uint64) ([]byte, int) {
 	buf := make([]byte, binary.MaxVarintLen64)
 	binary.PutUvarint(buf, i)
@@ -116,9 +127,68 @@ func ReadLatestObjectFromLog() (*pb.LogNode, error) {
 	return logObject, err
 }
 
-func LoadDHT() {
-	// load objects one by one and insert into DHT
+/*
+addToDHT is a helper function to the LoadDHT function. It adds the value to the
+DHT. If required it appends the value to list, else it inserts the value at the
+said position.
 
+Arguments:
+1. dht - The DHT in which value is added
+2. logObject - The object which contains value to be added, along with dhtIndex
+(the bucket in which the value is to be inserted) and bucket list index in
+ which the value is to inserted.
+
+Please check proto Log Object defination to know more about the LogNode variable.
+*/
+func addToDHT(dht *structures.DHT, logObject *pb.LogNode) {
+	row := logObject.DhtIndex
+	col := logObject.ListIndex
+
+	var nodeID structures.NodeID
+	copy(nodeID[:], logObject.Node.NodeId)
+
+	n := &structures.Node{
+		Key:    nodeID,
+		Port:   int(logObject.Node.Port),
+		Domain: logObject.Node.Domain,
+	}
+
+	if len(dht.Lists[row]) < int(col+1) {
+		dht.Lists[row] = append(dht.Lists[row], *n)
+		fmt.Println(dht.Lists[row])
+	} else {
+		dht.Lists[row][col] = *n
+	}
+}
+
+/*
+LoadDHT loads the DHT by replaying the tra nsaction Log entirely.
+It performs all the operations on the DHT that have occurred in the past, hence
+getting DHT to the same state as before the crash/shut down
+
+Arguments: None
+Returns:
+1. DHT - Returns the DHDT loaded from log, empty if error occurs.
+2. error - Non nil value if some error occured in between the program.
+*/
+func LoadDHT() (*structures.DHT, error) {
+
+	var dht structures.DHT
+	fi, err := logFile.Stat()
+	filePosition = 0
+	for {
+		if filePosition >= fi.Size() {
+			break
+		}
+		logObject, err := ReadLatestObjectFromLog()
+		if err != nil {
+			return &dht, err
+		}
+
+		addToDHT(&dht, logObject)
+	}
+
+	return &dht, err
 }
 
 func PeriodicSyncDHT() {
@@ -130,9 +200,19 @@ func clearLog() {
 }
 
 func flushDataStructureToDisk() {
-	//  gob ?
+	//  todo
 }
 
+/*
+InitPersistance starts the persistance module of Hydra. The goals of the persistance
+module is to open the log file. It opens the log file and brings the filePosition index
+to append mode.
+
+Arguments:
+1. filename = Name of the log file
+Returns:
+1. error = nil if no error else error
+*/
 func InitPersistance(filename string) error {
 	//  setup periodic flushing to disk
 	// open file
@@ -141,15 +221,13 @@ func InitPersistance(filename string) error {
 	return err
 }
 
-func ClosePersistance() {
-	logFile.Close()
-}
-
-func main() {
-
-	InitPersistance("log_1")
-
-	// do some stuff here
-
-	ClosePersistance()
+/*
+ClosePersistance closes the log file and shuts down the persisatnce module Gracefully
+Arguments:
+None
+Returns:
+error: nil if no error else some error
+*/
+func ClosePersistance() error {
+	return logFile.Close()
 }
