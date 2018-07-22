@@ -18,9 +18,11 @@ jobs:
           command: sh build.sh
       
       - run:
-          name: Run unit tests
-          command: go test ./...
-      
+          name: Run unit tests and generate coverage report
+          command: go test ./... -race -coverprofile=coverage.txt -covermode=atomic
+      - run:
+          name: Uploading test coverage report
+          command: bash <(curl -s https://codecov.io/bash)
       - save_cache:
           key: v1-pkg-cache
           paths:
