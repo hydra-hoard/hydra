@@ -1,0 +1,27 @@
+version: 2
+jobs:
+  build:
+    docker:
+        - image: karanchahal/go-protoc:1.0.0
+    
+    working_directory: /go/src/hydra-dht
+    
+    steps:  
+      - checkout
+      
+      - restore_cache:
+            keys:
+              - v1-pkg-cache
+      
+      - run: 
+          name: Building Project
+          command: sh build.sh
+      
+      - run:
+          name: Run unit tests
+          command: go test ./...
+      
+      - save_cache:
+          key: v1-pkg-cache
+          paths:
+            - "/go/pkg"
