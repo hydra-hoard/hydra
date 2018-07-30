@@ -6,3 +6,7 @@ go get -u github.com/golang/protobuf/protoc-gen-go
 cd protobuf
 sh proto.sh
 
+cd persistance
+mkdir log
+mkdir dht
+
