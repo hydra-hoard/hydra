@@ -1,6 +1,7 @@
 package persistance_test
 
 import (
+	"fmt"
 	"hydra-dht/persistance"
 	"hydra-dht/structures"
 	"os"
@@ -8,8 +9,8 @@ import (
 )
 
 func TestAppendToFile(t *testing.T) {
-	filename := "log_test"
-	persistance.InitPersistance(filename)
+
+	_, log, filePosition, _ := persistance.InitPersistance()
 
 	key := structures.NodeID{5, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124}
 
@@ -44,7 +45,7 @@ func TestAppendToFile(t *testing.T) {
 			t.Errorf("%v", err)
 		}
 
-		logObject, err := persistance.ReadLatestObjectFromLog()
+		logObject, err := persistance.ReadObjectFromLog(log, filePosition)
 		if err != nil {
 			t.Errorf("%v", err)
 		}
@@ -64,24 +65,55 @@ func TestAppendToFile(t *testing.T) {
 	if closingError != nil {
 		t.Errorf("%v", closingError)
 	}
-	os.Remove(filename)
+	cleanUpHelper()
 }
 
-func TestPeriodicSyncDHT(t *testing.T) {
-	// set time duration
-	// check if DHT exists
-	// check after some time
-	// DHT object should be saved to disk
-}
+func CreateDHTandLog(fileIndex string) *structures.DHT {
 
-func TestClearLog(t *testing.T) {
-	// clear log
-	// check if log cleared
+	persistance.InitPersistance()
+
+	key := structures.NodeID{5, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124}
+
+	var tests = []struct {
+		nodeId    byte
+		domain    string
+		port      int32
+		dhtIndex  int32
+		listIndex int32
+	}{
+
+		{1, "127.0.0.1", 10, 0, 0},
+		{2, "127.0.0.1", 20, 0, 1},
+		{3, "127.0.0.1", 30, 0, 2},
+		{4, "127.0.0.1", 40, 3, 0},
+		{5, "127.0.0.1", 50, 4, 0},
+		{6, "127.0.0.1", 60, 5, 0},
+		{7, "127.0.0.1", 70, 5, 1},
+		{8, "127.0.0.1", 80, 5, 2},
+	}
+	for _, test := range tests {
+
+		key[0] = test.nodeId
+
+		node := structures.Node{
+			Key:    key,
+			Domain: test.domain,
+			Port:   int(test.port),
+		}
+		persistance.AppendToLog(node, test.dhtIndex, test.listIndex)
+
+	}
+
+	dht, _ := persistance.LoadDHT()
+
+	persistance.ClosePersistance()
+	persistance.SaveDHT("dht/dht-"+fileIndex, dht)
+	return dht
 }
 
 func TestLoadDHT(t *testing.T) {
-	filename := "log_test"
-	persistance.InitPersistance(filename)
+
+	persistance.InitPersistance()
 
 	key := structures.NodeID{5, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124}
 
@@ -149,6 +181,191 @@ func TestLoadDHT(t *testing.T) {
 	if closingError != nil {
 		t.Errorf("%v", closingError)
 	}
-	os.Remove(filename)
+	cleanUpHelper()
 
+}
+
+func TestGetLogFileName(t *testing.T) {
+	var tests = []struct {
+		fileIndex string
+	}{
+
+		{"1"},
+	}
+	for _, test := range tests {
+		CreateDHTandLog(test.fileIndex)
+	}
+	files := persistance.GetPersistanceFileNames(persistance.LOG)
+	if len(files) != 1 {
+		t.Errorf("Wanted 1 log file but got %d number of files in Log", len(files))
+	}
+
+	cleanUpHelper()
+
+}
+
+func TestGetFileIndex(t *testing.T) {
+
+	i, err := persistance.GetFileIndex("log-1", persistance.LOG)
+	if err == nil {
+		fmt.Println(i)
+	} else {
+		t.Errorf("%v", err)
+	}
+
+	i, err = persistance.GetFileIndex("logas-1s", persistance.LOG)
+	if err == nil {
+		t.Errorf("This is an invalid name, test should error out, but err was nil")
+	}
+}
+
+func TestRecover(t *testing.T) {
+
+	// make different combinations of logs
+
+	var tests = []struct {
+		fileIndex string
+	}{
+
+		{"1"},
+		{"2"},
+		{"3"},
+	}
+	for _, test := range tests {
+		CreateDHTandLog(test.fileIndex)
+	}
+
+	cleanUpDHTs()
+
+	_, filename := persistance.RecoverDHT()
+	fmt.Println(filename)
+	if filename != "log-1" {
+		t.Errorf("Wanted filename: log-1, but got %v", filename)
+	}
+
+	cleanUpHelper()
+
+	tests = []struct {
+		fileIndex string
+	}{
+
+		{"1"},
+		{"2"},
+		{"3"},
+	}
+	for _, test := range tests {
+		CreateDHTandLog(test.fileIndex)
+	}
+
+	cleanUpLogs()
+
+	_, filename = persistance.RecoverDHT()
+	fmt.Println(filename)
+	if filename != "log-1" {
+		t.Errorf("Wanted filename: log-1, but got %v", filename)
+	}
+
+	cleanUpHelper()
+
+	tests = []struct {
+		fileIndex string
+	}{
+
+		{"1"},
+		{"2"},
+		{"3"},
+	}
+	for _, test := range tests {
+		CreateDHTandLog(test.fileIndex)
+	}
+
+	_, filename = persistance.RecoverDHT()
+	fmt.Println(filename)
+	if filename != "log-1" {
+		t.Errorf("Wanted filename: log-1, but got %v", filename)
+	}
+
+	cleanUpHelper()
+
+	tests = []struct {
+		fileIndex string
+	}{
+
+		{"1"},
+		{"2"},
+		{"3"},
+	}
+	for _, test := range tests {
+		CreateDHTandLog(test.fileIndex)
+	}
+
+	cleanUpDHTsBut("dht-1")
+
+	_, filename = persistance.RecoverDHT()
+	fmt.Println(filename)
+	if filename != "log-1" {
+		t.Errorf("Wanted filename: log-1, but got %v", filename)
+	}
+
+	cleanUpHelper()
+
+}
+
+func TestPeriodicSyncDHT(t *testing.T) {
+
+	persistance.InitPersistance()
+	var dht *structures.DHT
+	var tests = []struct {
+		fileIndex string
+	}{
+		{"121"},
+	}
+	for _, test := range tests {
+		dht = CreateDHTandLog(test.fileIndex)
+	}
+
+	persistance.PersistDHT(*dht)
+	logfiles := persistance.GetPersistanceFileNames(persistance.LOG)
+	dhtfiles := persistance.GetPersistanceFileNames(persistance.DHT)
+
+	logindex, err := persistance.GetFileIndex(string(logfiles[0].Name()), persistance.LOG)
+	dhtindex, err := persistance.GetFileIndex(string(dhtfiles[0].Name()), persistance.DHT)
+	if len(logfiles) != 1 || len(dhtfiles) != 1 || logindex != 2 || dhtindex != 1 {
+		t.Errorf("Wanted 1 log file and 1 dht file but got %d number of files in Log and %d files in dht", len(logfiles), len(dhtfiles))
+	} else if err != nil {
+		t.Errorf("%v", err)
+	}
+
+	cleanUpHelper()
+}
+
+func cleanUpHelper() {
+	cleanUpLogs()
+	cleanUpDHTs()
+
+}
+
+func cleanUpDHTs() {
+	dhtFiles := persistance.GetPersistanceFileNames(persistance.DHT)
+
+	for _, d := range dhtFiles {
+		os.Remove("dht/" + d.Name())
+	}
+}
+
+func cleanUpDHTsBut(filename string) {
+	dhtFiles := persistance.GetPersistanceFileNames(persistance.DHT)
+
+	for _, d := range dhtFiles {
+		if filename != d.Name() {
+			os.Remove("dht/" + d.Name())
+		}
+	}
+}
+
+func cleanUpLogs() {
+	logFiles := persistance.GetPersistanceFileNames(persistance.LOG)
+	for _, l := range logFiles {
+		os.Remove("log/" + l.Name())
+	}
 }

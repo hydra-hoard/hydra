@@ -62,6 +62,21 @@ func TestAddNode(t *testing.T) {
 
 }
 
-func TestComputeByte(t *testing.T) {
+func TestPeriodicSync(t *testing.T) {
+	// TODO
+	i := 1
+	duration := time.Duration(i) * time.Second
+
+	c := make(chan int)
+	ti := time.Now()
+
+	go dht.PeriodicSyncDHT(c, duration)
+
+	select {
+	case <-c:
+		if time.Since(ti).Seconds() >= float64(i+1) {
+			t.Errorf("%v", time.Since(ti).Seconds())
+		}
+	}
 
 }

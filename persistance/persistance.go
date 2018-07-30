@@ -2,11 +2,17 @@ package persistance
 
 import (
 	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"hydra-dht/constants"
 	pb "hydra-dht/protobuf/node"
 	"hydra-dht/structures"
+	"io/ioutil"
+	"log"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/golang/protobuf/proto"
 )
@@ -14,7 +20,32 @@ import (
 var (
 	logFile      *os.File
 	filePosition int64
+	logIndex     int = 1
 )
+
+type PERSISTANCE_FILE string
+
+const (
+	LOG PERSISTANCE_FILE = "log"
+	DHT PERSISTANCE_FILE = "dht"
+)
+
+// For sorting the log and dht files according to index that are read from the directory
+type fileSortObject struct {
+	FileInfo os.FileInfo
+	Index    int64
+}
+
+// LogFileNameError is the struct to aid when there is
+// an error for when the name for a log file is faulty.
+type LogFileNameError struct {
+	fileName string
+}
+
+// implements the error for the log file name error
+func (e *LogFileNameError) Error() string {
+	return fmt.Sprintf("Illegal LogFile name, the format for a log file is 'log-<int>', the file encountered is %s", e.fileName)
+}
 
 /*
 convertNumberToBytes is a helper function to AppendToLog. It converts a uint64 number
@@ -35,7 +66,6 @@ func convertNumberToBytes(i uint64) ([]byte, int) {
 	binary.PutUvarint(buf, i)
 
 	return buf, constants.LOG_OBJECT_BYTE_SIZE
-
 }
 
 /*
@@ -76,50 +106,44 @@ func AppendToLog(node structures.Node, dhtIndex int32, listIndex int32) error {
 	// the number of bytes consisting of logObject
 	i := uint64(len(out))
 	buf, _ := convertNumberToBytes(i)
-	fmt.Println(buf)
 	// writing the size of logObject into file
-	n2, err := logFile.Write(buf)
+	ob := append(buf, out...)
+	_, err = logFile.Write(ob)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Wrote %d bytes for the size of LogObject\n", n2)
 
-	// writing the logObject into file
-	n3, err := logFile.Write(out)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Wrote LogObject into file of size %d bytes\n", n3)
 	err = logFile.Sync()
 
 	return err
 }
 
 /*
-ReadLatestObjectFromLog reads and sends the latest / last log Object inside
+ReadObjectFromLog reads and sends the latest / last log Object inside
 the log file.
 
 Arguments:
-None
+1. Log: the log file in which to read an object from
+2. Pointer:  The pointer in the log file at the current seek stage.
 Returns:
 1. logNode = The Log node object retrieved from the log file. It will be empty
 if there is an error
 2. error = Error object. Will be nil if no error.
 
 */
-func ReadLatestObjectFromLog() (*pb.LogNode, error) {
+func ReadObjectFromLog(log *os.File, logPosition *int64) (*pb.LogNode, error) {
 
-	logFile.Seek(filePosition, 0)
+	log.Seek(*logPosition, 0)
 
 	sizeOfLogObjectBuffer := make([]byte, constants.LOG_OBJECT_BYTE_SIZE)
-	logFile.Read(sizeOfLogObjectBuffer)
-	filePosition += constants.LOG_OBJECT_BYTE_SIZE
+	log.Read(sizeOfLogObjectBuffer)
+	*logPosition += constants.LOG_OBJECT_BYTE_SIZE
 
 	sizeOfLogObject, _ := binary.Uvarint(sizeOfLogObjectBuffer)
-	filePosition += int64(sizeOfLogObject)
+	*logPosition += int64(sizeOfLogObject)
 
 	logObjectBuffer := make([]byte, sizeOfLogObject)
-	logFile.Read(logObjectBuffer)
+	log.Read(logObjectBuffer)
 
 	logObject := &pb.LogNode{}
 	err := proto.Unmarshal(logObjectBuffer, logObject)
@@ -145,6 +169,7 @@ func addToDHT(dht *structures.DHT, logObject *pb.LogNode) {
 	col := logObject.ListIndex
 
 	var nodeID structures.NodeID
+
 	copy(nodeID[:], logObject.Node.NodeId)
 
 	n := &structures.Node{
@@ -155,7 +180,6 @@ func addToDHT(dht *structures.DHT, logObject *pb.LogNode) {
 
 	if len(dht.Lists[row]) < int(col+1) {
 		dht.Lists[row] = append(dht.Lists[row], *n)
-		fmt.Println(dht.Lists[row])
 	} else {
 		dht.Lists[row][col] = *n
 	}
@@ -180,7 +204,7 @@ func LoadDHT() (*structures.DHT, error) {
 		if filePosition >= fi.Size() {
 			break
 		}
-		logObject, err := ReadLatestObjectFromLog()
+		logObject, err := ReadObjectFromLog(logFile, &filePosition)
 		if err != nil {
 			return &dht, err
 		}
@@ -191,16 +215,172 @@ func LoadDHT() (*structures.DHT, error) {
 	return &dht, err
 }
 
-func PeriodicSyncDHT() {
-	// clear log
+/*
+flushLog reads the log's objects and applies it to the dht.
+
+Arguments:
+1. dht: The pointer to the DHT on which the operations of log are applied.
+2. log: The log file which has the operations stored.
+Returns:
+1. error: Error if any, nil if no error
+
+The DHT is modified and since it's passed by reference, there is no need to return it.
+*/
+func flushLog(dht *structures.DHT, log *os.File) error {
+	fi, err := log.Stat()
+	var logPosition int64
+	logPosition = 0
+	for {
+		if logPosition >= fi.Size() {
+			break
+		}
+		logObject, err := ReadObjectFromLog(log, &logPosition)
+		if err != nil {
+			return err
+		}
+
+		addToDHT(dht, logObject)
+	}
+
+	return err
 }
 
-func clearLog() {
-	// clear log till some point
+// persists dht at regular time intervas when called from dht.go
+func PersistDHT(dht structures.DHT) error {
+
+	logIndex++
+	openLogFile("log-" + strconv.Itoa(logIndex)) // sets up new log file
+	err := flushDataStructureToDisk(&dht)
+
+	if err != nil {
+		return err
+	}
+	logFilename := "log-" + strconv.Itoa(logIndex)
+	dhtFilename := "dht-" + strconv.Itoa(logIndex-1)
+	clearAllLogsAndDhtsBut(logFilename, dhtFilename)
+
+	return nil
 }
 
-func flushDataStructureToDisk() {
+// remove old log file,
+// remove all log files not of the following name
+// clear log till some point
+func clearAllLogsAndDhtsBut(logFilename string, dhtFilename string) {
+
+	logFiles := GetPersistanceFileNames(LOG)
+	dhtFiles := GetPersistanceFileNames(DHT)
+
+	// crucial operation, if shut down occurs now
+	// information is lost.
+
+	for _, l := range logFiles {
+		if logFilename != l.Name() {
+			os.Remove("log/" + l.Name())
+		}
+	}
+	for _, d := range dhtFiles {
+		if dhtFilename != d.Name() {
+			os.Remove("dht/" + d.Name())
+		}
+	}
+}
+
+// Saves the dht to Disk
+func flushDataStructureToDisk(dht *structures.DHT) error {
 	//  todo
+	filename := "dht/dht-" + strconv.Itoa(logIndex-1) // save dht of old log.
+	err := SaveDHT(filename, dht)
+
+	return err
+}
+
+/*
+getLogFileName get Latest Log file names
+
+This function gets the filename of the log file. It look into the log directory. If only one log file is found.
+It returns that. If more than one log file is found. there can be 2 scenarios
+
+1. The previous program failed in the middle of DHT sync
+This failure can be anywhere, so we assume that the latest log file is not the absolute truth.
+
+We look at DHT saved
+
+1. so first switch file name and new file is created, 2 files 1 one dht.
+# fail -  then take old log, and old dht, apply operation on it
+2. save DHT : 2 files 2 dht.
+# fail load DHT, if successful of loading latest DHT , then play back log file instructions of new log file on dht and send. If not successful, then do above thing
+3. delete prev file 1 file, 2 DHT
+# fail if 2 dht found and one log file. then take latest dht and process with log file and send
+4. delete prev DHT so, 1 dht, one file
+# fail - so all good
+5. all good
+
+Arguments:
+1. filename = Name of the log file
+Returns:
+1. error = nil if no error else error
+*/
+func GetPersistanceFileNames(fileType PERSISTANCE_FILE) []os.FileInfo {
+	files, err := ioutil.ReadDir(string(fileType))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var latestLogs []fileSortObject
+	for i := len(files) - 1; i >= 0; i-- {
+		fileName := files[i].Name()
+		j, err := GetFileIndex(fileName, fileType)
+		if err != nil {
+			// just print the error or not
+			fmt.Println(err)
+		} else {
+			latestLogs = append(latestLogs, fileSortObject{FileInfo: files[i], Index: j})
+		}
+	}
+
+	sort.Slice(latestLogs, func(i, j int) bool {
+		return latestLogs[i].Index > latestLogs[j].Index
+	})
+
+	var finalLogs []os.FileInfo
+	for _, f := range latestLogs {
+		finalLogs = append(finalLogs, f.FileInfo)
+	}
+
+	return finalLogs
+}
+
+/*
+GetFileIndex gets the index of file in the log or dht folders.
+For examples if the filename is log-23, it will return 23.
+Arguments:
+1. name:  The file name
+2. fileType: File Type ,whether it was a dht or a log file
+Returns:
+1. int - The file index
+2. err - error , nil if no error
+*/
+func GetFileIndex(name string, fileType PERSISTANCE_FILE) (int64, error) {
+	number := strings.SplitAfter(name, "-")
+	number[0] = strings.TrimRight(number[0], "-")
+	if len(number) > 2 || number[0] != string(fileType) {
+		return -1, &LogFileNameError{name}
+	}
+
+	return strconv.ParseInt(number[1], 10, 32)
+
+}
+
+// will always create new log file after recover
+// saves dht object and then clears up log.
+func openLogFile(filename string) error {
+
+	// create file
+	var err error
+	logFile, err = os.Create("log/" + filename)
+	filePosition = 0
+
+	return err
 }
 
 /*
@@ -209,20 +389,207 @@ module is to open the log file. It opens the log file and brings the filePositio
 to append mode.
 
 Arguments:
-1. filename = Name of the log file
+None
 Returns:
-1. error = nil if no error else error
+1. The persistant Dht retrieved by starting up the program.nil if error
+2. error = nil if no error else error
 */
-func InitPersistance(filename string) error {
+func InitPersistance() (*structures.DHT, *os.File, *int64, error) {
 	//  setup periodic flushing to disk
 	// open file
 	var err error
-	logFile, err = os.Create(filename)
+	dht, filename := RecoverDHT()
+	logIndex = 1
+	err = openLogFile(filename)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return dht, logFile, &filePosition, nil
+}
+
+// cleans up all logs and dhts and saves new fresh dht.
+func persistanceCleanUp(dht *structures.DHT) string {
+
+	logFiles := GetPersistanceFileNames(LOG)
+	dhtFiles := GetPersistanceFileNames(DHT)
+
+	// crucial operation, if shut down occurs now
+	// information is lost.
+	for _, d := range dhtFiles {
+		os.Remove("dht/" + d.Name())
+	}
+
+	for _, l := range logFiles {
+		os.Remove("log/" + l.Name())
+	}
+
+	// save dht to disk
+	SaveDHT("dht/dht-0", dht)
+
+	// the index of the new log file
+	return "log-1"
+}
+
+// recovers dht if sudden shut down, this culd be multiple log files and dhts in folder.
+// It cleans up the folders and saves new fresh dht in disk and starts new log.
+func RecoverDHT() (*structures.DHT, string) {
+	logFiles := GetPersistanceFileNames(LOG)
+	dhtFiles := GetPersistanceFileNames(DHT)
+
+	// init variables
+	var l_ind int64
+	var d_ind int64
+	var l os.FileInfo
+	var d os.FileInfo
+	logStack := []os.FileInfo{}
+
+	i := 0 // index to logFiles
+	j := 0 // index to dhtFiles
+
+	for i < len(logFiles) && j < len(dhtFiles) {
+
+		l = logFiles[i] // TAKE CURRENT LOG
+		d = dhtFiles[j] // TAKE CURRENT DHT
+
+		l_ind, _ = GetFileIndex(l.Name(), LOG) // get log index
+		d_ind, _ = GetFileIndex(d.Name(), DHT) // get dht index
+
+		fmt.Println(l_ind, d_ind)
+
+		// if log is ahead than dht , then push to stack
+		if l_ind > d_ind {
+			fmt.Println("Adding to log stack")
+			logStack = append(logStack, l)
+			i++
+			continue
+		}
+		// if log is behind the current DHT
+		dht, err := LoadDHTFile(d.Name())
+		// if error in reading DHT, go to next DHT
+		if err != nil {
+			fmt.Println(err)
+			j++
+			continue
+		} else {
+			return processLogStack(dht, logStack, d_ind)
+
+		}
+	}
+
+	// if all log files are processed, but dht isn't so, find one good dht, if found ,then process.
+	// else go to empty dht condition
+	for j < len(dhtFiles) {
+		d = dhtFiles[j] // TAKE CURRENT DHT
+		dht, err := LoadDHTFile(d.Name())
+		// if error in reading DHT, go to next DHT
+		if err != nil {
+			fmt.Println(err)
+			j++
+			continue
+		} else {
+			return processLogStack(dht, logStack, d_ind)
+		}
+	}
+
+	// this means either all DHT in memory are corrupted
+	// so we start from empty DHT
+	// traverse remaining logs into log stack and then process log stack
+	var dhtEmpty structures.DHT
+
+	for i < len(logFiles) {
+		l = logFiles[i] // TAKE CURRENT LOG
+		// if log is ahead than dht , then push to stack
+		fmt.Println(l.Name())
+		fmt.Println("Adding to log stack")
+		logStack = append(logStack, l)
+		i++
+	}
+	if len(logStack) == 0 {
+		return &dhtEmpty, "log-1"
+	}
+	lastLogIndex, _ := GetFileIndex(logStack[len(logStack)-1].Name(), LOG)
+	d_ind = lastLogIndex - 1
+	return processLogStack(&dhtEmpty, logStack, d_ind)
+}
+
+// helper function to recover log.
+func processLogStack(dht *structures.DHT, logStack []os.FileInfo, d_ind int64) (*structures.DHT, string) {
+	latestLogFileName := ""
+
+	for i := len(logStack) - 1; i >= 0; i-- {
+		// get index of file, can't error out
+		lind, err := GetFileIndex(logStack[i].Name(), LOG)
+
+		// if error in file index or, the log is far ahead of the state of DHT, return that dht
+		// setup new file for logging.
+		if err != nil || d_ind != lind-1 {
+			fmt.Println("Log dht not compatible !")
+
+			// clear all logs in log folder and other dht's, rename dht and log to new index.
+			latestLogFileName = persistanceCleanUp(dht)
+			// make new_log-file,
+			return dht, latestLogFileName // log dht not compatible
+		}
+
+		// open log file
+		file, err := os.Open("log/" + logStack[i].Name())
+
+		// if error in opening file, clean up everything as before error scenario, and go with current DHT
+		if err != nil {
+			fmt.Println(err)
+			latestLogFileName = persistanceCleanUp(dht)
+			return dht, latestLogFileName // if error, then
+		}
+
+		// no error in opening log file
+		// now use log and run all the operation of log in DHT
+		err = flushLog(dht, file)
+
+		// if there is an error while flushing, that means problem with the log
+		// discard log and clean up operations.
+		if err != nil {
+			fmt.Println(err)
+			latestLogFileName = persistanceCleanUp(dht)
+			return dht, latestLogFileName // if error, then
+		}
+
+		// if there is no error, then flushing has happened well.
+		file.Close()
+		// update state of DHT for next log
+		d_ind++
+
+	}
+
+	// now clean up redundant log files and make new dht object file
+	latestLogFileName = persistanceCleanUp(dht)
+	return dht, latestLogFileName // if error, then
+}
+
+// Saves dht gob to file
+func SaveDHT(path string, dht *structures.DHT) error {
+	file, err := os.Create(path)
+	if err == nil {
+		encoder := gob.NewEncoder(file)
+		encoder.Encode(dht)
+	}
+	file.Close()
 	return err
 }
 
+// loads dht gob from file to memory
+func LoadDHTFile(path string) (*structures.DHT, error) {
+	dht := &structures.DHT{}
+	file, err := os.Open("dht/" + path)
+	if err == nil {
+		decoder := gob.NewDecoder(file)
+		err = decoder.Decode(dht)
+	}
+	file.Close()
+	return dht, err
+}
+
 /*
-ClosePersistance closes the log file and shuts down the persisatnce module Gracefully
+ClosePersistance closes the log file and shuts down the persiatance module Gracefully
 Arguments:
 None
 Returns:
