@@ -7,6 +7,7 @@ cd ..
 cd persistance
 mkdir log
 mkdir dht
+cd ..
 
 #install libraries
 go get -d -v ./...
