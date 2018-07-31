@@ -16,6 +16,17 @@ message Node {
     int32 port = 3;
 }
 
+// The object that gets stored into the log file
+message LogNode {
+
+    // the node getting stored
+    Node node = 1;
+    // the bucket number of the DHt where node is stored in
+    int32 dhtIndex = 2;
+    // the position in the bucket where the node is stored in
+    int32 listIndex = 3;
+}
+
 message CloserNodes {
   // List of nodes found closest to request key
   repeated Node nodes = 1;

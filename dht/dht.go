@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hydra-dht/constants"
 	nodedetails "hydra-dht/nodedetails"
+	"hydra-dht/persistance"
 	pb "hydra-dht/protobuf/node"
 	structures "hydra-dht/structures"
 	"log"
@@ -22,6 +23,23 @@ var (
 	bucketSize         = 0
 	cacheExpiryMinutes = 1.0
 )
+
+func PeriodicSyncDHT(c chan int, duration time.Duration) {
+	// clear log
+	for {
+		select {
+		case <-time.After(duration):
+			// send dht at that extent
+			persistance.PersistDHT(dht)
+			// for the unit test
+			c <- 1
+		}
+	}
+}
+
+func getDHT() *structures.DHT {
+	return &dht
+}
 
 // Appends to list of nodes of DHT's row
 func addInDHT(n *structures.Node, row int) {
@@ -180,7 +198,7 @@ func Listeners(i int) {
 			if len(dht.Lists[i]) < bucketSize {
 				addInDHT(n, i)
 				response.Input = true
-			} else {
+			} else if len(dht.Lists[i]) == bucketSize {
 				j, ping := checkAndUpdateCache(i)
 				response.Ping = ping
 
@@ -188,6 +206,8 @@ func Listeners(i int) {
 					replaceInDHT(n, i, j)
 					response.Input = true
 				}
+			} else {
+				panic("The bucket has more elements than bucket size !")
 			}
 		} else {
 			fmt.Println("Node exists!!")
@@ -301,4 +321,9 @@ func InitDHT(size int, timeoutForCache float64) {
 		channels.WriteChannel[i] = make(chan *structures.NodePacket)
 		go Listeners(i)
 	}
+
+	// switch on persistance
+
+	// persistance.InitPersistance()
+	// go PeriodicSyncDHT(nil, 5*time.Second)
 }

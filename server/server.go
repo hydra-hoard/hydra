@@ -76,7 +76,9 @@ func StartServer() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterNodeDiscoveryServer(grpcServer, getDataStructure())
 	// determine whether to use tls
-	dhtUtil.InitDHT(2)
+
+	// time out for cache is 1 hour
+	dhtUtil.InitDHT(2, 60)
 
 	grpcServer.Serve(lis)
 
