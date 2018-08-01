@@ -69,8 +69,7 @@ func TestAppendToFile(t *testing.T) {
 }
 
 func CreateDHTandLog(fileIndex string) *structures.DHT {
-
-	persistance.InitPersistance()
+	logFile, _, _ := persistance.OpenLogFile("log-" + fileIndex)
 
 	key := structures.NodeID{5, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124}
 
@@ -100,21 +99,23 @@ func CreateDHTandLog(fileIndex string) *structures.DHT {
 			Domain: test.domain,
 			Port:   int(test.port),
 		}
-		persistance.AppendToLog(node, test.dhtIndex, test.listIndex)
-
+		persistance.AppendToLogUtil(logFile, node, test.dhtIndex, test.listIndex)
 	}
-
-	dht, _ := persistance.LoadDHT()
+	// replay log on empty dht
+	var dht structures.DHT
+	persistance.FlushLog(&dht, logFile)
 
 	persistance.ClosePersistance()
-	persistance.SaveDHT("dht/dht-"+fileIndex, dht)
-	return dht
+	persistance.SaveDHT("dht/dht-"+fileIndex, &dht)
+	return &dht
 }
 
 func TestLoadDHT(t *testing.T) {
 
-	persistance.InitPersistance()
-
+	logFile, _, err := persistance.OpenLogFile("log-1")
+	if err != nil {
+		t.Errorf("%v", err)
+	}
 	key := structures.NodeID{5, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124, 234, 4, 67, 124}
 
 	var tests = []struct {
@@ -150,7 +151,9 @@ func TestLoadDHT(t *testing.T) {
 
 	}
 
-	dht, err := persistance.LoadDHT()
+	// replay log on empty dht
+	var dht structures.DHT
+	persistance.FlushLog(&dht, logFile)
 
 	if err != nil {
 		t.Errorf("%v", err)
@@ -293,7 +296,7 @@ func TestRecover(t *testing.T) {
 
 		{"1"},
 		{"2"},
-		{"3"},
+		{"10"},
 	}
 	for _, test := range tests {
 		CreateDHTandLog(test.fileIndex)

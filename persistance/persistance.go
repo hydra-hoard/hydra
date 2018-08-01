@@ -86,7 +86,8 @@ Returns:
 1. error: Returns error , if no error then error is nil
 
 */
-func AppendToLog(node structures.Node, dhtIndex int32, listIndex int32) error {
+
+func AppendToLogUtil(logFile *os.File, node structures.Node, dhtIndex int32, listIndex int32) error {
 	// write to file in following format
 	logObject := &pb.LogNode{
 		Node: &pb.Node{
@@ -116,6 +117,14 @@ func AppendToLog(node structures.Node, dhtIndex int32, listIndex int32) error {
 	err = logFile.Sync()
 
 	return err
+}
+
+/*
+AppendToLog is the wrapper function called by the DHT to aappend an object into the log.
+Read Documentation for AppendToLogUtil for more information
+*/
+func AppendToLog(node structures.Node, dhtIndex int32, listIndex int32) error {
+	return AppendToLogUtil(logFile, node, dhtIndex, listIndex)
 }
 
 /*
@@ -186,37 +195,7 @@ func addToDHT(dht *structures.DHT, logObject *pb.LogNode) {
 }
 
 /*
-LoadDHT loads the DHT by replaying the tra nsaction Log entirely.
-It performs all the operations on the DHT that have occurred in the past, hence
-getting DHT to the same state as before the crash/shut down
-
-Arguments: None
-Returns:
-1. DHT - Returns the DHDT loaded from log, empty if error occurs.
-2. error - Non nil value if some error occured in between the program.
-*/
-func LoadDHT() (*structures.DHT, error) {
-
-	var dht structures.DHT
-	fi, err := logFile.Stat()
-	filePosition = 0
-	for {
-		if filePosition >= fi.Size() {
-			break
-		}
-		logObject, err := ReadObjectFromLog(logFile, &filePosition)
-		if err != nil {
-			return &dht, err
-		}
-
-		addToDHT(&dht, logObject)
-	}
-
-	return &dht, err
-}
-
-/*
-flushLog reads the log's objects and applies it to the dht.
+FlushLog reads the log's objects and applies it to the dht in the argument.
 
 Arguments:
 1. dht: The pointer to the DHT on which the operations of log are applied.
@@ -226,7 +205,7 @@ Returns:
 
 The DHT is modified and since it's passed by reference, there is no need to return it.
 */
-func flushLog(dht *structures.DHT, log *os.File) error {
+func FlushLog(dht *structures.DHT, log *os.File) error {
 	fi, err := log.Stat()
 	var logPosition int64
 	logPosition = 0
@@ -249,7 +228,7 @@ func flushLog(dht *structures.DHT, log *os.File) error {
 func PersistDHT(dht structures.DHT) error {
 
 	logIndex++
-	openLogFile("log-" + strconv.Itoa(logIndex)) // sets up new log file
+	OpenLogFile("log-" + strconv.Itoa(logIndex)) // sets up new log file
 	err := flushDataStructureToDisk(&dht)
 
 	if err != nil {
@@ -373,14 +352,14 @@ func GetFileIndex(name string, fileType PERSISTANCE_FILE) (int64, error) {
 
 // will always create new log file after recover
 // saves dht object and then clears up log.
-func openLogFile(filename string) error {
+func OpenLogFile(filename string) (*os.File, *int64, error) {
 
 	// create file
 	var err error
 	logFile, err = os.Create("log/" + filename)
 	filePosition = 0
 
-	return err
+	return logFile, &filePosition, err
 }
 
 /*
@@ -400,14 +379,21 @@ func InitPersistance() (*structures.DHT, *os.File, *int64, error) {
 	var err error
 	dht, filename := RecoverDHT()
 	logIndex = 1
-	err = openLogFile(filename)
+	_, _, err = OpenLogFile(filename)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	return dht, logFile, &filePosition, nil
 }
 
-// cleans up all logs and dhts and saves new fresh dht.
+/* persistanceCleanUp cleans up all logs and dhts and saves new fresh dht sent through
+the arguments.
+Arguments:
+
+1. dht = The DHT to be saved.structures
+
+Rest every log and dht is deleted.
+*/
 func persistanceCleanUp(dht *structures.DHT) string {
 
 	logFiles := GetPersistanceFileNames(LOG)
@@ -543,7 +529,7 @@ func processLogStack(dht *structures.DHT, logStack []os.FileInfo, d_ind int64) (
 
 		// no error in opening log file
 		// now use log and run all the operation of log in DHT
-		err = flushLog(dht, file)
+		err = FlushLog(dht, file)
 
 		// if there is an error while flushing, that means problem with the log
 		// discard log and clean up operations.
