@@ -54,3 +54,22 @@ type AddNodeResponse struct {
 	Ping      bool
 	Input     bool
 }
+
+// AddDatasetResponse is the response generated when the request to add a new database
+// to the tracker
+type DatabaseResponse struct {
+	Hash   string
+	Status string
+}
+
+type DatabasePeer struct {
+	ItemType string
+	Hash     string
+	Address  string
+}
+
+type DatasetInfo struct {
+	ItemType  string
+	Hash      string
+	NumPieces int
+}

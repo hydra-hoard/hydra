@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	databaseUtil "hydra-dht/database"
 	dhtUtil "hydra-dht/dht"
 	pb "hydra-dht/protobuf/node"
 	"io/ioutil"
@@ -131,7 +132,71 @@ func StartCLI() {
 	}
 }
 
+func StartTracker() {
+
+	for {
+		reader := bufio.NewReader(os.Stdin)
+		color.Green("1. Register a new Dataset \n2. Add Peer to download list \n3. Contribute data to torrent")
+		color.Blue("Enter an option: ")
+		option, _ := reader.ReadString('\n')
+		option = strings.TrimSpace(option)
+		switch option {
+		case "1":
+			color.Blue("You selected Register a new Dataset ")
+			color.Blue("Enter Dataset hash ")
+			hash, _ := reader.ReadString('\n')
+			hash = strings.TrimSpace(hash)
+			channel := databaseUtil.RegisterDataset(hash)
+
+			select {
+			case actual := <-channel:
+				fmt.Println(actual.Status)
+
+			case <-time.After(time.Second * 5):
+				fmt.Println("Time Out error")
+			}
+
+		case "2":
+			color.Blue("Add Peer to download list")
+			color.Blue("Enter the node key ")
+			nodeId, _ := reader.ReadString('\n')
+			nodeId = strings.TrimSpace(nodeId)
+
+			color.Blue("Enter Dataset hash ")
+			hash, _ := reader.ReadString('\n')
+			hash = strings.TrimSpace(hash)
+
+			color.Blue("Enter the Address of the node ")
+			address, _ := reader.ReadString('\n')
+			address = strings.TrimSpace(hash)
+
+			channel := databaseUtil.AddPeer(nodeId, hash, address)
+
+			select {
+			case actual := <-channel:
+				fmt.Println(actual.Status)
+			case <-time.After(time.Second * 5):
+				fmt.Println("Time Out error")
+			}
+		}
+	}
+
+	// tracker strores information on each dataset item
+
+	// information includes
+
+	// file size
+	// file id
+
+	// tracker functions:
+
+	// create dataset
+	// add to dataset
+	// download dataset , basically giving info of where to download from .
+}
+
 func main() {
-	go StartServer()
-	StartCLI()
+	//go StartServer()
+	StartTracker()
+	//StartCLI()
 }
