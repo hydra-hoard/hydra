@@ -127,6 +127,18 @@ func StartCLI() {
 			case <-time.After(time.Second * 1):
 				fmt.Println("Time Out error")
 			}
+		case "3":
+			color.Blue("Peer Initiation: Contact Bootstrap Server")
+			color.Blue("Enter Bootstrap Server Port Number")
+			port, _ := reader.ReadString('\n')
+			port = strings.TrimSpace(port)
+
+			channel, _ := dhtUtil.PeerInitation("127.0.0.1", port)
+
+			select {
+			case nodeID := <-channel:
+				fmt.Println(nodeID)
+			}
 		}
 	}
 }

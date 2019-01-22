@@ -5,6 +5,9 @@ service NodeDiscovery {
     rpc FindNodes(Node) returns (CloserNodes) {}
 
     rpc Ping(Node) returns (PingResponse) {}
+
+    // service to get peer id of newly formed peer
+    rpc PeerInitiation(Node) returns (Node) {}
 }
 
 message Node {

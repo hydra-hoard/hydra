@@ -41,6 +41,10 @@ func getDHT() *structures.DHT {
 	return &dht
 }
 
+func PeerInitation(host string, port int) {
+
+}
+
 // Appends to list of nodes of DHT's row
 func addInDHT(n *structures.Node, row int) {
 	fmt.Println("Added node into DHT")
